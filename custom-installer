@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# ["Program name"]="package-name_description"
+# ^^            ^^^^            ^           ^
+declare -A apps=(
+		   ["Aqualung"]="aqualung_Music player"
+		   ["Frozen Bubble"]="frozen-bubble_Game"
+		   ["Gcolor2"]="gcolor2_Color selector"
+		   ["Gweled"]="gweled_Puzzle game"
+		   ["Mini Tube"]="minitube_Youtube"
+		   ["Neverball"]="neverball_Game"
+		   ["Qmmp"]="qmmp_Music player"
+		   ["Shutter"]="shutter_For screenshots"
+                )
+
+chklist=()
+for k in "${!apps[@]}"; do chklist+=( "FALSE" "$k" "${apps[$k]#*_}" "$(apt-cache policy "${apps[$k]%%_*}" | awk '/Installed:/{ print $2 }')" ); done
+
+choices=$( zenity --title="Apps install" --width=520 --height=400 \
+                  --text="Select to install" \
+                  --list --column="Select" --column="Name" --column="Description" --column="Installed" \
+                  --checklist "${chklist[@]}" )
+
+# If Cancel is clicked then exit
+if [ "${PIPESTATUS[0]}" -ne "0" ]; then
+	exit 0
+fi
+
+# check if anything is selected
+echo "$choices" | grep '[a-zA-Z0-9]'
+if [ "${PIPESTATUS[1]}" -ne "0" ]; then
+	zenity --info --title='Install Apps' --text='Nothing was selected for installation.'
+	exit 1
+fi
+
+pkg=()
+IFS='|' read -a choices <<< "$choices"
+for k in "${choices[@]}"; do pkg+=( "${apps[$k]%%_*}" ); done
+
+stdbuf -oL sudo apt-get -y install "${pkg[@]}"  --show-progress | stdbuf -oL sed -n -e 's/Progress:[ ]\[//;s/%\]//;s/^[ \t]*//p;/^[a-zA-Z]/s/^/#/p' | zenity --progress --title="Installing - Please wait" --auto-close
+
+if [ "${PIPESTATUS[0]}" -ne "0" ]; then
+		zenity --error --title="Install Apps" --text="Something went wrong while installing!"
+		exit 1
+fi
+
+zenity --info --title="Install Apps" --text="Successfully installed."
+exit 0
