@@ -71,9 +71,6 @@ done | (if ! zenity  --progress \
 
 _chklist()
 {
-count=0
-total="${#APPS[@]}"
-
 for k in "${!APPS[@]}"; do
         while read -a X; do
                 # Grab and set a var for the build.
