@@ -1,48 +1,148 @@
 #!/bin/bash
 
-# ["Program name"]="package-name_description"
-# ^^            ^^^^            ^           ^
-declare -A apps=(
-		   ["Aqualung"]="aqualung_Music player"
-		   ["Frozen Bubble"]="frozen-bubble_Game"
-		   ["Gcolor2"]="gcolor2_Color selector"
-		   ["Gweled"]="gweled_Puzzle game"
-		   ["Mini Tube"]="minitube_Youtube"
-		   ["Neverball"]="neverball_Game"
-		   ["Qmmp"]="qmmp_Music player"
-		   ["Shutter"]="shutter_For screenshots"
+# check for elevated privileges
+if [ "$EUID" -ne "0" ]; then
+        if   [[ "$gksu" -eq "0" ]]; then
+                   exec gksu "$(realpath $0)"
+                   exit 0
+        elif [[ "$kdesu" -eq "0" ]]; then
+                   exec kdesu "$(realpath $0)"
+                   exit 0
+        else
+                   echo "Cannot find appropiate way to run as root! Please report!" 1>&2
+                   exit 1
+        fi
+fi
+
+# [key]="package-name_description"
+declare -A APPS=(
+		   [0]="aqualung_Music player"
+		   [1]="frozen-bubble_Game"
+		   [2]="gcolor2_Color selector"
+		   [3]="gweled_Puzzle game"
+		   [4]="minitube_Youtube"
+		   [5]="neverball_Game"
+		   [6]="qmmp_Music player"
+		   [7]="shutter_For screenshots"
                 )
 
-chklist=()
-for k in "${!apps[@]}"; do chklist+=( "FALSE" "$k" "${apps[$k]#*_}" "$(apt-cache policy "${apps[$k]%%_*}" | awk '/Installed:/{ print $2 }')" ); done
+# [key]="app name"
+declare -A APP_NAME=(
+		   [0]="Aqualung"
+		   [1]="Frozen Bubble"
+		   [2]="Gcolor2"
+		   [3]="Gweled"
+		   [4]="Mini Tube"
+		   [5]="Neverball"
+		   [6]="Qmmp"
+		   [7]="Shutter"
+                )
 
-choices=$( zenity --title="Apps install" --width=520 --height=400 \
-                  --text="Select to install" \
-                  --list --column="Select" --column="Name" --column="Description" --column="Installed" \
-                  --checklist "${chklist[@]}" )
+APP_TITLE="Install Apps"
+
+function _checklock ()
+{
+# Checks for exclusive lock and wait until package managers are closed
+while  fuser /var/lib/dpkg/lock 2>&1 >/dev/null  ; do
+        echo "# !     . . .       . . .   waiting for package manager(s) to close   . . .     . . .      !" $"\n"
+        if [ "$(pidof synaptic)" ]; then
+              echo "# !     . . .       . . .   waiting for package manager(s) to close   . . .     . . .      !" $"\nsynaptic"
+        fi
+        echo 1
+        sleep 1
+        echo 30
+        sleep 1
+        echo 60
+        sleep 1
+        if [ ! -z "$(pgrep gdebi-gtk)" ]; then
+              echo "# !     . . .       . . .   waiting for package manager(s) to close   . . .     . . .      !" $"\ngdebi-gtk"
+        fi
+        echo 95
+        sleep 1
+done | (if ! zenity  --progress \
+                    --window-icon="$ic" \
+                    --title="$APP_TITLE - Waiting!" \
+                    --percentage=20 \
+                    --auto-close
+         then killall $(basename $0)
+              exit 0
+         fi)
+}
+
+_chklist()
+{
+count=0
+total="${#APPS[@]}"
+
+for k in "${!APPS[@]}"; do
+        while read -a X; do
+                # Grab and set a var for the build.
+                if [ "${X[0]}" == "Installed:" ]; then
+                        if [ "${X[1]}" == "(none)" ]; then
+                                printf -v _VERSION "%s" ""
+                        else
+                                printf -v _VERSION "%s" "${X[1]}"
+                        fi
+                        break
+                fi
+        done <<< "$(apt-cache policy "${APPS[$k]%%_*}")"
+        printf "%s\n%s\n%s\n%s\n%s\n" "FALSE" "$k" "${APP_NAME[$k]}" "${APPS[$k]#*_}" "$_VERSION"
+done
+}
+
+_main()
+{
+# Main dialog
+choices=$( _chklist | zenity --title="$APP_TITLE" \
+                             --width=520 \
+                             --height=400 \
+                             --text="Select to install" \
+                             --list \
+                             --column="Select" \
+                             --column="Key" \
+                             --column="Name" \
+                             --column="Description" \
+                             --column="Installed" \
+                             --checklist \
+                             --hide-column=2 \
+                             --print-column=2 )
 
 # If Cancel is clicked then exit
-if [ "${PIPESTATUS[0]}" -ne "0" ]; then
+if [ "${?}" -ne "0" ]; then
 	exit 0
 fi
 
-# check if anything is selected
-echo "$choices" | grep '[a-zA-Z0-9]'
-if [ "${PIPESTATUS[1]}" -ne "0" ]; then
-	zenity --info --title='Install Apps' --text='Nothing was selected for installation.'
+if [[ ! "${choices}" =~ ^[0-9|]+$ ]]; then
+	zenity --info \
+               --title="$APP_TITLE" \
+               --text='Nothing was selected for installation.'
+	_main
+fi
+}
+
+_main
+
+pkg=()
+IFS='|' read -a choices <<< "${choices}"
+for choice in "${choices[@]}"; do
+       pkg+=( "${APPS[$choice]%%_*}" )
+done
+
+# Check for exclusive lock
+_checklock
+
+stdbuf -oL apt-get -y --force-yes install "${pkg[@]}" --show-progress \
+| stdbuf -oL sed -n -e 's/Progress:[ ]\[//;s/%\]//;s/^[ \t]*//p;/^[a-zA-Z]/s/^/#/p' \
+| zenity --progress --title="Installing - Please wait" --auto-close
+
+if [ "${PIPESTATUS[0]}" -ne "0" ]; then
+	zenity --error \
+               --title="$APP_TITLE" \
+               --text="Something went wrong while installing!"
 	exit 1
 fi
 
-pkg=()
-IFS='|' read -a choices <<< "$choices"
-for k in "${choices[@]}"; do pkg+=( "${apps[$k]%%_*}" ); done
-
-stdbuf -oL sudo apt-get -y install "${pkg[@]}"  --show-progress | stdbuf -oL sed -n -e 's/Progress:[ ]\[//;s/%\]//;s/^[ \t]*//p;/^[a-zA-Z]/s/^/#/p' | zenity --progress --title="Installing - Please wait" --auto-close
-
-if [ "${PIPESTATUS[0]}" -ne "0" ]; then
-		zenity --error --title="Install Apps" --text="Something went wrong while installing!"
-		exit 1
-fi
-
-zenity --info --title="Install Apps" --text="Successfully installed."
+zenity --info \
+       --title="$APP_TITLE" \
+       --text="Successfully installed."
 exit 0
