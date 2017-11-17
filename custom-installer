@@ -3,10 +3,10 @@
 # check for elevated privileges
 if [ "$EUID" -ne "0" ]; then
         if   [[ "$gksu" -eq "0" ]]; then
-                   exec gksu "$(realpath $0)"
+                   exec gksu "$0"
                    exit 0
         elif [[ "$kdesu" -eq "0" ]]; then
-                   exec kdesu "$(realpath $0)"
+                   exec kdesu "$0"
                    exit 0
         else
                    echo "Cannot find appropiate way to run as root! Please report!" 1>&2
